@@ -1,0 +1,47 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build exe
+        run: |
+          pip install pyinstaller
+          pyinstaller --onefile --noconsole --name QuayManHinh app.py
+
+      - name: Download ffmpeg and package
+        shell: pwsh
+        run: |
+          try {
+            Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ff.zip
+          } catch {
+            Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile ff.zip
+          }
+          Expand-Archive ff.zip -DestinationPath ff
+          New-Item -ItemType Directory QuayManHinh | Out-Null
+          Copy-Item dist/QuayManHinh.exe QuayManHinh/
+          Copy-Item (Get-ChildItem ff -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName QuayManHinh/
+          Copy-Item README.md QuayManHinh/HUONG-DAN.txt
+          Compress-Archive QuayManHinh QuayManHinh.zip
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.${{ github.run_number }}
+          name: Quay Màn Hình v1.${{ github.run_number }}
+          body: Tải file **QuayManHinh.zip** bên dưới, giải nén, rồi bấm đúp **QuayManHinh.exe**.
+          files: QuayManHinh.zip
+          make_latest: true
