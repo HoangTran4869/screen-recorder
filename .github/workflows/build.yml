@@ -21,6 +21,7 @@ jobs:
       - name: Package with official signed Python (no self-made exe)
         shell: pwsh
         run: |
+          trap { Write-Host "::error::$($_.InvocationInfo.ScriptLineNumber): $_"; exit 1 }
           $v = python -c "import platform;print(platform.python_version())"
           $base = python -c "import sys;print(sys.base_prefix)"
           $app = "QuayManHinh/app"
@@ -50,8 +51,8 @@ jobs:
 
           # Kiem tra tkinter chay duoc
           $env:TCL_LIBRARY = (Resolve-Path "$app/tcl/tcl8.6").Path
-          & "$app/python.exe" -c "import tkinter; print('Tcl', tkinter.Tcl().eval('info patchlevel'))"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $out = & "$app/python.exe" -c "import tkinter; print('Tcl', tkinter.Tcl().eval('info patchlevel'))" 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tkinter test: $($out -replace "`r?`n", ' | ')"; exit 1 }
 
           Compress-Archive QuayManHinh QuayManHinh.zip
 
