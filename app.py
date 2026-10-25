@@ -18,11 +18,21 @@ import subprocess
 import sys
 import tempfile
 import time
+
+_BASE = os.path.dirname(os.path.abspath(sys.argv[0] if sys.argv and sys.argv[0] else __file__))
+for _n, _env in (("tcl8.6", "TCL_LIBRARY"), ("tk8.6", "TK_LIBRARY")):
+    if os.path.isdir(os.path.join(_BASE, "tcl", _n)):
+        os.environ.setdefault(_env, os.path.join(_BASE, "tcl", _n))
+
 import tkinter as tk
 from ctypes import wintypes
 from tkinter import messagebox, ttk
 
 user32 = ctypes.windll.user32
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("HoangTran.QuayManHinh")
+except Exception:
+    pass
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except Exception:
@@ -33,6 +43,7 @@ except Exception:
 
 APP_NAME = "Quay Màn Hình"
 BASE = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
+ICON = os.path.join(BASE, "icon.ico")
 FFMPEG = os.path.join(BASE, "ffmpeg.exe")
 if not os.path.exists(FFMPEG):
     FFMPEG = shutil.which("ffmpeg") or FFMPEG
@@ -44,6 +55,9 @@ NO_MIC = "Không thu tiếng"
 
 HOTKEYS = {"Ctrl": 0x11, "Shift": 0x10, "F8": 0x77, "Chuột giữa": 0x04}
 STYLES = ["Vòng tròn", "Đèn rọi", "Cả hai"]
+# chat luong: (crf, preset, so khung hinh/giay)
+QUALITY = {"Tiêu chuẩn": (23, "ultrafast", 30), "Cao": (16, "veryfast", 30), "Rất cao (60fps)": (14, "veryfast", 60)}
+SEL_COLOR = "#ff2d55"
 
 
 # ---------------- Ham tien ich Windows ----------------
@@ -130,6 +144,10 @@ class Overlay:
         self.hole = self.spot.create_oval(0, 0, 0, 0, fill=KEY, outline="")
         self.halo = self.ring.create_oval(0, 0, 0, 0, outline="#ff9500", width=3, state="hidden")
         self.circle = self.ring.create_oval(0, 0, 0, 0, outline="#ffd60a", width=6, state="hidden")
+        self.sel = self.ring.create_rectangle(0, 0, 0, 0, outline=SEL_COLOR, width=2, state="hidden")
+        self.sel_bg = self.ring.create_rectangle(0, 0, 0, 0, fill=SEL_COLOR, outline="", state="hidden")
+        self.sel_txt = self.ring.create_text(0, 0, text="", fill="white", anchor="nw",
+                                             font=("Segoe UI", 10, "bold"), state="hidden")
         self.spot_on = False
         self.ring_on = False
         self.buttons = {1: False, 2: False}
@@ -147,6 +165,28 @@ class Overlay:
         c.pack(fill="both", expand=True)
         make_click_through(w)
         return w, c
+
+    def raise_top(self):
+        self.ring_win.attributes("-topmost", True)
+        self.ring_win.lift()
+
+    def show_sel(self, x1, y1, x2, y2):
+        """Ve khung chon (toa do man hinh)."""
+        a, b = min(x1, x2) - self.vx, min(y1, y2) - self.vy
+        c, d = max(x1, x2) - self.vx, max(y1, y2) - self.vy
+        self.ring.coords(self.sel, a, b, c, d)
+        self.ring.itemconfig(self.sel_txt, text=f" {c - a} × {d - b} ")
+        ty = b - 24 if b > 30 else b + 4
+        self.ring.coords(self.sel_txt, a + 4, ty + 2)
+        bx = self.ring.bbox(self.sel_txt) or (a, ty, a + 80, ty + 20)
+        self.ring.coords(self.sel_bg, bx[0] - 2, bx[1] - 1, bx[2] + 2, bx[3] + 1)
+        for it in (self.sel, self.sel_bg, self.sel_txt):
+            self.ring.itemconfig(it, state="normal")
+        self.ring.tag_raise(self.sel_txt)
+
+    def hide_sel(self):
+        for it in (self.sel, self.sel_bg, self.sel_txt):
+            self.ring.itemconfig(it, state="hidden")
 
     def tick(self):
         try:
@@ -199,27 +239,28 @@ class Overlay:
 
 
 # ---------------- Chon vung quay ----------------
-def select_region(root, callback):
+def select_region(root, overlay, callback):
     vx, vy, vw, vh = virtual_screen()
     pw, ph = primary_size()
     w = tk.Toplevel(root)
     w.overrideredirect(True)
     w.geometry(f"{vw}x{vh}+{vx}+{vy}")
     w.attributes("-topmost", True)
-    w.attributes("-alpha", 0.4)
+    w.attributes("-alpha", 0.35)
     c = tk.Canvas(w, bg="black", cursor="cross", highlightthickness=0)
     c.pack(fill="both", expand=True)
     c.create_text(pw // 2 - vx, ph // 2 - vy, fill="white", font=("Segoe UI", 20, "bold"),
                   text="Kéo chuột để chọn vùng quay  •  Esc để hủy")
-    st = {"start": None, "rect": None}
+    st = {"start": None}
+    root.after(50, overlay.raise_top)
 
     def press(e):
         st["start"] = (e.x, e.y)
-        st["rect"] = c.create_rectangle(e.x, e.y, e.x, e.y, outline="white", width=3)
+        overlay.show_sel(e.x + vx, e.y + vy, e.x + vx, e.y + vy)
 
     def drag(e):
-        if st["rect"]:
-            c.coords(st["rect"], *st["start"], e.x, e.y)
+        if st["start"]:
+            overlay.show_sel(st["start"][0] + vx, st["start"][1] + vy, e.x + vx, e.y + vy)
 
     def release(e):
         if not st["start"]:
@@ -227,6 +268,7 @@ def select_region(root, callback):
         x1, y1 = st["start"]
         left, top = min(x1, e.x), min(y1, e.y)
         width, height = abs(e.x - x1), abs(e.y - y1)
+        overlay.hide_sel()
         w.destroy()
         if width < 40 or height < 40:
             callback(None)
@@ -234,6 +276,7 @@ def select_region(root, callback):
             callback((left + vx, top + vy, width, height))
 
     def cancel(_e=None):
+        overlay.hide_sel()
         w.destroy()
         callback(None)
 
@@ -266,10 +309,30 @@ def countdown(root, n, done):
     step(n)
 
 
+def record_frame(root, rect):
+    x, y, w, h = rect
+    p = 4
+    win = tk.Toplevel(root)
+    win.overrideredirect(True)
+    win.geometry(f"{w + 2 * p}x{h + 2 * p}+{x - p}+{y - p}")
+    win.attributes("-topmost", True)
+    win.attributes("-transparentcolor", KEY)
+    c = tk.Canvas(win, bg=KEY, highlightthickness=0)
+    c.pack(fill="both", expand=True)
+    c.create_rectangle(1, 1, w + 2 * p - 2, h + 2 * p - 2, outline=SEL_COLOR, width=3)
+    make_click_through(win)
+    try:
+        user32.SetWindowDisplayAffinity(hwnd_of(win), 0x11)
+    except Exception:
+        pass
+    return win
+
+
 # ---------------- Bo ghi hinh (ffmpeg) ----------------
 class Recorder:
-    def __init__(self, rect, mic):
+    def __init__(self, rect, mic, quality):
         self.rect, self.mic = rect, mic
+        self.crf, self.preset, self.fps = QUALITY.get(quality, QUALITY["Cao"])
         self.tmp = tempfile.mkdtemp(prefix="qmh_")
         self.segs, self.proc, self.logf = [], None, None
 
@@ -277,11 +340,11 @@ class Recorder:
         x, y, w, h = self.rect
         seg = os.path.join(self.tmp, f"part{len(self.segs):03d}.mkv")
         cmd = [FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
-               "-thread_queue_size", "512", "-f", "gdigrab", "-framerate", "30", "-draw_mouse", "1",
+               "-thread_queue_size", "512", "-f", "gdigrab", "-framerate", str(self.fps), "-draw_mouse", "1",
                "-offset_x", str(x), "-offset_y", str(y), "-video_size", f"{w}x{h}", "-i", "desktop"]
         if self.mic:
             cmd += ["-thread_queue_size", "1024", "-f", "dshow", "-rtbufsize", "64M", "-i", f"audio={self.mic}"]
-        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"]
+        cmd += ["-c:v", "libx264", "-preset", self.preset, "-crf", str(self.crf), "-pix_fmt", "yuv420p"]
         if self.mic:
             cmd += ["-c:a", "aac", "-b:a", "160k"]
         cmd.append(seg)
@@ -359,6 +422,14 @@ class App:
         self.click_fx = tk.BooleanVar(value=cfg.get("click_fx", True))
         self.count3 = tk.BooleanVar(value=cfg.get("count3", True))
         self.hide_bar = tk.BooleanVar(value=cfg.get("hide_bar", True))
+        self.quality = tk.StringVar(value=cfg.get("quality", "Cao"))
+        if self.quality.get() not in QUALITY:
+            self.quality.set("Cao")
+        self.frame_win = None
+        try:
+            root.iconbitmap(default=ICON)
+        except Exception:
+            pass
         self.state = "idle"
         self.rec = None
         self.elapsed = 0.0
@@ -414,8 +485,14 @@ class App:
         ttk.Combobox(hk, textvariable=self.style, values=STYLES, state="readonly", width=10).pack(
             side="left", padx=4)
 
+        ttk.Label(f, text="Chất lượng:").grid(row=4, column=0, sticky="w", pady=(4, 0))
+        ql = ttk.Frame(f)
+        ql.grid(row=4, column=1, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Combobox(ql, textvariable=self.quality, values=list(QUALITY), state="readonly", width=16).pack(side="left")
+        ttk.Button(ql, text="🖥  Tạo biểu tượng ngoài Desktop", command=self.make_shortcut).pack(side="left", padx=8)
+
         opt = ttk.Frame(f)
-        opt.grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        opt.grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
         ttk.Checkbutton(opt, text="Hiệu ứng khi bấm chuột", variable=self.click_fx).pack(side="left")
         ttk.Checkbutton(opt, text="Đếm ngược 3 giây", variable=self.count3).pack(side="left", padx=10)
         ttk.Checkbutton(opt, text="Ẩn bảng này khỏi video", variable=self.hide_bar,
@@ -440,7 +517,24 @@ class App:
     def save(self):
         save_cfg({"region": self.region.get(), "mic": self.mic.get(), "hotkey": self.hotkey.get(),
                   "style": self.style.get(), "click_fx": self.click_fx.get(), "count3": self.count3.get(),
-                  "hide_bar": self.hide_bar.get()})
+                  "hide_bar": self.hide_bar.get(), "quality": self.quality.get()})
+
+    def make_shortcut(self):
+        pyw = os.path.join(BASE, "pythonw.exe")
+        if not os.path.exists(pyw):
+            messagebox.showinfo(APP_NAME, "Chức năng này chỉ dùng được với bản tải từ GitHub.")
+            return
+        script = os.path.abspath(sys.argv[0])
+        q = lambda t: t.replace("'", "''")
+        ps = ("$d=[Environment]::GetFolderPath('Desktop');"
+              "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d 'Quay Màn Hình.lnk'));"
+              f"$s.TargetPath='{q(pyw)}';$s.Arguments='\"{q(script)}\"';"
+              f"$s.WorkingDirectory='{q(BASE)}';$s.IconLocation='{q(ICON)},0';$s.Save()")
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, creationflags=NOWIN)
+        if r.returncode == 0:
+            messagebox.showinfo(APP_NAME, "Đã tạo biểu tượng 'Quay Màn Hình' ngoài Desktop.")
+        else:
+            messagebox.showerror(APP_NAME, "Không tạo được biểu tượng:\n" + r.stderr.decode("utf-8", "ignore")[-300:])
 
     def open_folder(self, select=None):
         os.makedirs(OUT_DIR, exist_ok=True)
@@ -448,6 +542,11 @@ class App:
             subprocess.Popen(["explorer", "/select,", select])
         else:
             os.startfile(OUT_DIR)
+
+    def close_frame(self):
+        if self.frame_win:
+            self.frame_win.destroy()
+            self.frame_win = None
 
     def set_buttons(self):
         idle = self.state == "idle"
@@ -463,7 +562,7 @@ class App:
             return
         self.save()
         if self.region.get() == "area":
-            select_region(self.root, self._got_rect)
+            select_region(self.root, self.overlay, self._got_rect)
         else:
             w, h = primary_size()
             self._got_rect((0, 0, w, h))
@@ -482,7 +581,7 @@ class App:
     def _start(self, rect):
         os.makedirs(OUT_DIR, exist_ok=True)
         mic = self.mic.get()
-        self.rec = Recorder(rect, None if mic == NO_MIC else mic)
+        self.rec = Recorder(rect, None if mic == NO_MIC else mic, self.quality.get())
         try:
             self.rec.start_segment()
         except Exception as e:
@@ -491,6 +590,8 @@ class App:
             self.set_buttons()
             return
         self.state, self.elapsed, self.t_start = "rec", 0.0, time.time()
+        if self.region.get() == "area":
+            self.frame_win = record_frame(self.root, rect)
         self.set_buttons()
 
     def on_pause(self):
@@ -519,6 +620,7 @@ class App:
             messagebox.showerror(APP_NAME, f"Lưu video bị lỗi:\n{e}")
         self.root.config(cursor="")
         self.rec, self.state = None, "idle"
+        self.close_frame()
         self.set_buttons()
         self.lbl_time.config(text="00:00")
         if ok and messagebox.askyesno(APP_NAME, f"Đã lưu video:\n{out}\n\nMở thư mục chứa video?"):
@@ -530,6 +632,7 @@ class App:
             if err:
                 self.rec.discard()
                 self.rec, self.state = None, "idle"
+                self.close_frame()
                 self.set_buttons()
                 hint = "\n\nGợi ý: thử chọn micro khác hoặc chọn 'Không thu tiếng'." if self.mic.get() != NO_MIC else ""
                 messagebox.showerror(APP_NAME, f"Quay bị dừng do lỗi:\n{err}{hint}")

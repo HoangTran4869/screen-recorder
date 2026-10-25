@@ -46,6 +46,7 @@ jobs:
 
           # Ma nguon + file bam dup de mo
           Copy-Item app.py "$app/app.pyw"
+          Copy-Item icon.ico $app
           Copy-Item launcher.bat "QuayManHinh/Mo-QuayManHinh.bat"
           Copy-Item README.md "QuayManHinh/HUONG-DAN.txt"
 
