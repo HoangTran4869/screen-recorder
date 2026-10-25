@@ -31,7 +31,7 @@ jobs:
           Invoke-WebRequest "https://www.python.org/ftp/python/$v/python-$v-embed-amd64.zip" -OutFile py.zip
           Expand-Archive py.zip $app
           Copy-Item -Recurse "$base/Lib/tkinter" "$app/tkinter"
-          Copy-Item "$base/DLLs/_tkinter.pyd", "$base/DLLs/tcl*.dll", "$base/DLLs/tk*.dll" $app
+          Copy-Item "$base/DLLs/_tkinter.pyd", "$base/DLLs/*.dll" $app -Force
           Copy-Item -Recurse "$base/tcl" "$app/tcl"
           Remove-Item -Recurse -Force "$app/tkinter/test", "$app/tcl/tix*" -ErrorAction SilentlyContinue
 
