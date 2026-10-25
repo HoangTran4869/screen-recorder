@@ -3,8 +3,7 @@
 Ứng dụng quay màn hình nhẹ, dễ dùng cho Windows 10/11.
 
 ## Tải về
-Vào trang https://github.com/HoangTran4869/screen-recorder/releases/latest → tải **QuayManHinh.zip** → giải nén → bấm đúp **QuayManHinh.exe**.
-(Nếu Windows báo "Windows protected your PC": bấm **More info** → **Run anyway**.)
+Vào trang https://github.com/HoangTran4869/screen-recorder/releases/latest → tải **QuayManHinh.zip** → giải nén → bấm đúp **Mo-QuayManHinh.bat**.
 
 ## Cách dùng
 - **⏺ Quay**: bắt đầu quay (có đếm ngược 3 giây).

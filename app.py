@@ -281,7 +281,7 @@ class Recorder:
                "-offset_x", str(x), "-offset_y", str(y), "-video_size", f"{w}x{h}", "-i", "desktop"]
         if self.mic:
             cmd += ["-thread_queue_size", "1024", "-f", "dshow", "-rtbufsize", "64M", "-i", f"audio={self.mic}"]
-        cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"]
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"]
         if self.mic:
             cmd += ["-c:a", "aac", "-b:a", "160k"]
         cmd.append(seg)
